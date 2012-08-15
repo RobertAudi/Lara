@@ -1,0 +1,501 @@
+<?php
+
+// Environment
+define('ENVIRONMENT', 'development');
+switch (ENVIRONMENT)
+{
+    case 'development':
+        error_reporting(-1);
+        ini_set('display_errors', 1);
+    break;
+
+    case 'production':
+        error_reporting(0);
+    break;
+
+    default:
+        exit('The application environment is not set correctly.');
+}
+
+// Constants
+define('MISSING_PROJECT_NAME', 1);
+
+/**
+ * Lara
+ */
+class Lara
+{
+    /**
+     * Configuration array
+     *
+     * @access private
+     * @var array
+     */
+    private static $config = array(
+
+        // Repository that Lara will clone when bootstrapping or
+        // creating a new project
+        'repository' => 'laravel/laravel',
+
+        // Tag or branch to checkout after cloning laravel
+        'tag_or_branch' => 'staging',
+
+        // List of bundles to include in new projects
+        'bundles' => array('bob'),
+
+    );
+
+# -Stop-editing-here------------------------------------------------------------
+
+    /**
+     * List of parsed command line arguments
+     *
+     * @access private
+     * @var array
+     */
+    private static $args = array();
+
+    /**
+     * List of parsed command line options
+     *
+     * @access private
+     * @var array
+     * @author Aziz Light
+     */
+    private static $opts = array();
+
+    /**
+     * List of valid long command line options
+     *
+     * @access private
+     * @var array
+     */
+    private static $valid_options = array('--bootstrap', '--force-clone', '--no-bundles');
+
+
+    /**
+     * El Contructor!
+     *
+     * @access public
+     * @throws RuntimeException
+     * @return void
+     * @author Aziz Light
+     */
+    public function __construct()
+    {
+        throw new RuntimeException('Lara cannot be instanciated!');
+    }
+
+    /**
+     * Initializes Lara
+     *
+     * @access public
+     * @param array $args Command line arguments
+     * @return void
+     * @author Aziz Light
+     */
+    public static function init(array $args)
+    {
+        self::$args = self::parse($args);
+    }
+
+    public static function run()
+    {
+        if (self::$opts['bootstrap'] === TRUE)
+        {
+            $laravel = __DIR__ . DIRECTORY_SEPARATOR . 'laravel';
+
+            if (is_dir($laravel))
+            {
+                self::delete_dir($laravel);
+            }
+
+            fwrite(STDOUT, 'Bootstrapping Lara...' . PHP_EOL);
+
+            if (self::git_clone(self::$config['repository'], $laravel, self::$config['tag_or_branch']))
+            {
+                fwrite(STDOUT, 'Lara is now bootstrapped!' . PHP_EOL);
+            }
+            else
+            {
+                throw new RuntimeException('Unable to bootstrap Lara...');
+            }
+        }
+        else
+        {
+            if (self::lara_is_bootstrapped() && self::$opts['force-clone'] === FALSE)
+            {
+                fwrite(STDOUT, 'Creating new project...' . PHP_EOL);
+                if (self::cp_r(self::$args['project_location'] . self::$args['project_name'], __DIR__ . DIRECTORY_SEPARATOR . 'laravel'))
+                {
+                    fwrite(STDOUT, 'New project created!' . PHP_EOL);
+                }
+                else
+                {
+                    throw new RuntimeException('Error creating new project...');
+                }
+            }
+            else
+            {
+                fwrite(STDOUT, 'Cloning Laravel...' . PHP_EOL);
+                if (self::git_clone(self::$config['repository'], self::$args['project_location'], self::$config['tag_or_branch']))
+                {
+                    fwrite(STDOUT, 'Laravel cloned!' . PHP_EOL);
+                }
+                else
+                {
+                    throw new RuntimeException('Error cloning Laravel...');
+                }
+            }
+        }
+    }
+
+    /**
+     * Parse command line arguments and store options in
+     * the $options static variable
+     *
+     * @access private
+     * @param array $args Command line arguments
+     * @return array Parsed command line arguments
+     * @throws InvalidArgumentException
+     * @author Aziz Light
+     */
+    private static function parse(array $args)
+    {
+        // Remove the script name
+        array_shift($args);
+
+        if (empty($args))
+        {
+            throw new InvalidArgumentException('Lara needs a project name!', MISSING_PROJECT_NAME);
+        }
+
+        self::$opts = self::options($args);
+
+        $parsed_args = array();
+
+        if (self::$opts['bootstrap'] === FALSE)
+        {
+            if (php_uname("s") === 'Windows NT')
+            {
+                $args[0] = preg_replace('/\//', '\\', $args[0]);
+            }
+
+            $parts = explode(DIRECTORY_SEPARATOR, $args[0]);
+            $parsed_args['project_name'] = end($parts);
+            array_pop($parts);
+
+            if (count($parts) > 0)
+            {
+                $parsed_args['project_location'] = join(DIRECTORY_SEPARATOR, $parts) . DIRECTORY_SEPARATOR;
+            }
+
+            array_shift($args);
+
+            if (!empty($args))
+            {
+                throw new InvalidArgumentException('Invalid argument: ' . $args[0]);
+            }
+        }
+
+        return $parsed_args;
+    }
+
+    /**
+     * Get options passed to the command line
+     *
+     * @access private
+     * @param array $args Command line arguments
+     * @return array Valid options
+     * @throws UnexpectedValueException
+     * @author Aziz Light
+     */
+    private static function options(array &$args)
+    {
+        $options = array();
+
+        // Setup the options array
+        foreach (self::$valid_options as $option)
+        {
+            $options[substr($option, 2)] = false;
+        }
+
+        foreach ($args as $index => $arg)
+        {
+            if (substr($arg, '0', 1) === "-")
+            {
+                if (!in_array($arg, self::$valid_options))
+                {
+                    throw new UnexpectedValueException('Invalid option: ' . $arg);
+                }
+            }
+            else
+            {
+                continue;
+            }
+
+            foreach (self::$valid_options as $option)
+            {
+                if ($arg === $option)
+                {
+                    $options[substr($arg, 2)] = TRUE;
+                    unset($args[$index]);
+                    break;
+                }
+            }
+        }
+
+        // If the bootstrap option is passed, then it should be the only option
+        if ($options['bootstrap'] === TRUE)
+        {
+            if (count($args) > 0)
+            {
+                throw new UnexpectedValueException('The --bootstrap option must be alone.' . PHP_EOL . 'Usage: lara --bootstrap');
+            }
+
+            foreach ($options as $key => $value)
+            {
+                if ($key === 'bootstrap')
+                {
+                    continue;
+                }
+                else if ($value === TRUE)
+                {
+                    throw new UnexpectedValueException('The --bootstrap option cannot be coupled with any other option!');
+                }
+            }
+        }
+        else if (empty($args) && in_array(TRUE, $options))
+        {
+            throw new UnexpectedValueException('Invalid option: --' . array_search(TRUE, $options, TRUE));
+        }
+
+        return $options;
+    }
+
+    /**
+     * Delete a directory and its contents
+     *
+     * @access private
+     * @param string $dir The directory to delete
+     * @return void
+     * @author alcuadrado on StackOverflow
+     * @link http://stackoverflow.com/questions/3349753/php-delete-directory-with-files-in-it#answer-3349792
+     */
+    private static function delete_dir($dir)
+    {
+        $it = new RecursiveDirectoryIterator($dir);
+        $files = new RecursiveIteratorIterator($it, RecursiveIteratorIterator::CHILD_FIRST);
+
+        // empty the directory
+        foreach($files as $file)
+        {
+            if ($file->isDir())
+            {
+                rmdir($file->getRealPath());
+            }
+            else
+            {
+                // The chmod call here is to avoid Permission Denied errors in Windows
+                chmod($file->getRealPath(), 0777);
+                unlink($file->getRealPath());
+            }
+        }
+
+        // delete the .git directory
+        rmdir($dir);
+
+        return;
+    }
+
+    /**
+     * Clone the Codeigniter repository
+     *
+     * @access private
+     * @param string $repo The git repository url
+     * @param string $location The location where the git repo will be cloned
+     * @param string $tag_or_branch A tag or branch in the git repo to be checked out
+     * @return boolean TRUE/FALSE depending on wheter the repo was cloned or not
+     * @author Aziz Light
+     */
+    private static function git_clone($repo, $location, $tag_or_branch = "")
+    {
+        $repo = 'https://github.com/' . $repo . '.git';
+
+        if (php_uname('s') === "Windows NT")
+        {
+            $command = 'git clone ' . $repo . ' "' . $location . '" > NUL && echo CLONED || echo ERROR';
+        }
+        else
+        {
+            $command = 'git clone ' . $repo . ' ' . $location . ' > /dev/null 2>&1 && echo "CLONED" || echo "ERROR"';
+        }
+
+        exec($command, $output);
+        if ($output[0] === "CLONED")
+        {
+            if (!empty($tag_or_branch))
+            {
+                unset($command);
+
+                if (php_uname('s') === "Windows NT")
+                {
+                    $command = 'git checkout ' . $tag_or_branch . ' > NUL && echo CHECKEDOUT || echo ERROR';
+                }
+                else
+                {
+                    $command = 'git checkout ' . $tag_or_branch . ' > /dev/null 2>&1 && echo "CHECKEDOUT" || echo "ERROR"';
+                }
+
+                exec($command, $output);
+                if ($output[0] === "ERROR")
+                {
+                    self::delete_dir($location);
+                    return FALSE;
+                }
+            }
+
+            // delete the .git directory
+            self::delete_dir($location . DIRECTORY_SEPARATOR . '.git');
+            return TRUE;
+        }
+        else if ($output[0] == "ERROR")
+        {
+            return FALSE;
+        }
+    }
+
+    /**
+     * Checks if Lara is bootstrapped
+     *
+     * @access private
+     * @return bool Wether or not Lara is bootstrapped
+     * @author Aziz Light
+     */
+    private static function lara_is_bootstrapped()
+    {
+        return is_dir(__DIR__ . DIRECTORY_SEPARATOR . 'laravel');
+    }
+
+    /**
+     * Copy the CodeIgniter folder to create a new project.
+     * It's a pain in the ass to transfer permissions when copying a file/folder
+     * in php so here is what will happen:
+     *     - All the files will have a permission of 644.
+     *     - All the folders will have a permission of 755.
+     *
+     * I did not create this method, It's Sina Salek who left it as comment
+     * on php.net {@link http://www.php.net/manual/en/function.copy.php#91256}
+     * and then info ]t[ intalo [.] de modified
+     * it {@link http://www.php.net/manual/en/function.copy.php#93953}
+     *
+     * @access private
+     * @param string $dest : The destination folder.
+     * @param string $source : The source file/folder.
+     * @param string $folderPermission : The permission that will be given to all folders.
+     * @param string $filePermission  : The permission that will be given to all files.
+     * @return bool Whether or not the copying succeeded.
+     * @author Sina Salek
+     */
+    private static function cp_r($dest = '', $source = '', $folderPermission = 0755, $filePermission = 0644)
+    {
+        $result = FALSE;
+
+        if (is_file($source))
+        {
+            if (is_dir($dest))
+            {
+                if ($dest[strlen($dest) - 1] != '/')
+                {
+                    $__dest = $dest . '/';
+                }
+
+                $__dest .= basename($source);
+            }
+            else
+            {
+                $__dest = $dest;
+            }
+
+            $result = copy($source, $__dest);
+            chmod($__dest, $filePermission);
+        }
+        elseif (is_dir($source))
+        {
+            if (!is_dir($dest))
+            {
+                mkdir($dest, $folderPermission);
+                chmod($dest, $folderPermission);
+            }
+
+            if ($source[strlen($source) - 1] != '/')
+            {
+                $source = $source . '/';
+            }
+
+            if ($dest[strlen($dest) - 1] != '/')
+            {
+                $dest = $dest . '/';
+            }
+
+            $result = TRUE;
+            $dirHandle = opendir($source);
+            while ($file = readdir($dirHandle))
+            {
+                if ($file != '.' && $file != '..')
+                {
+                    $result = self::cp_r($dest . $file, $source . $file, $folderPermission, $filePermission);
+                }
+            }
+            closedir($dirHandle);
+        }
+        else
+        {
+            $result = FALSE;
+        }
+
+        return $result;
+    }
+}
+
+# ------------------------------------------------------------------------------
+
+try
+{
+    Lara::init($argv);
+    Lara::run();
+}
+catch (RuntimeException $e)
+{
+    fwrite(STDOUT, $e->getMessage() . PHP_EOL);
+    exit;
+}
+catch (UnexpectedValueException $e)
+{
+    fwrite(STDOUT, $e->getMessage() . PHP_EOL);
+    exit;
+}
+catch (InvalidArgumentException $e)
+{
+    if ($e->getCode() === MISSING_PROJECT_NAME)
+    {
+        fwrite(STDOUT, 'Please enter a project name: ');
+        $pname = trim(fgets(STDIN));
+        if (empty($pname))
+        {
+            fwrite(STDOUT, 'Lara needs a project name!' . PHP_EOL);
+            exit;
+        }
+        else
+        {
+            // retry to run the script.
+            Lara::init(array_merge($argv, array($pname)));
+            exit;
+        }
+    }
+    else
+    {
+        fwrite(STDOUT, $e->getMessage() . PHP_EOL);
+        exit;
+    }
+}
