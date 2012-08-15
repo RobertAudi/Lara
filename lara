@@ -147,6 +147,49 @@ class Lara
                     throw new RuntimeException('Error cloning Laravel...');
                 }
             }
+
+            if (self::$opts['no-bundles'] === FALSE && !empty(self::$config['bundles']))
+            {
+                fwrite(STDOUT, 'Installing bundles...' . PHP_EOL);
+
+                # ------------------------------------------------------------------
+                # This block of code is here to prevent artisan from showing an
+                # error message. Remove it and you will enter a world of pain!
+                foreach ($_SERVER['argv'] as $index => $value)
+                {
+                    if ($index === 0)
+                    {
+                        continue;
+                    }
+                    else
+                    {
+                        array_pop($_SERVER['argv']);
+                    }
+                }
+
+                $_SERVER['argv'][] = 'bundle:install';
+                $_SERVER['argv'][] = self::$config['bundles'][0];
+                array_shift(self::$config['bundles']);
+                # ------------------------------------------------------------------
+
+                chdir(self::$args['project_location'] . self::$args['project_name'] . DIRECTORY_SEPARATOR);
+
+                require_once 'paths.php';
+                require path('sys').'core.php';
+                require path('sys').'cli/artisan'.EXT;
+
+                if (!empty(self::$config['bundles']))
+                {
+                    foreach (self::$config['bundles'] as $bundle)
+                    {
+                        Laravel\CLI\Command::run(array('bundle:install', $bundle));
+                    }
+                }
+
+                fwrite(STDOUT, 'Bundles installed!' . PHP_EOL . 'REMEMBER, you still have to activate the bundles!' . PHP_EOL);
+            }
+
+            fwrite(STDOUT, 'Lara out!' . PHP_EOL);
         }
     }
 
@@ -188,6 +231,10 @@ class Lara
             if (count($parts) > 0)
             {
                 $parsed_args['project_location'] = join(DIRECTORY_SEPARATOR, $parts) . DIRECTORY_SEPARATOR;
+            }
+            else
+            {
+                $parsed_args['project_location'] = getcwd() . DIRECTORY_SEPARATOR;
             }
 
             array_shift($args);
